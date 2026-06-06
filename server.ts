@@ -502,12 +502,9 @@ let activeCrops: ServerCrop[] = loadCrops();
 let paymentLedger: ServerLedgerLog[] = loadLedger();
 let mockVolumenSalesUsd = loadVolume();
 
+export const app = express();
+
 async function startServer() {
-  const app = express();
-  const PORT = 3050; // Actually port is forwarded relative to 3000 but express listens on 3000 as mandated by environment constraints.
-  // Wait, let's verify if PORT should be exactly 3000:
-  // "PORT value (3000) is hardcoded by the infrastructure and cannot be changed or overridden."
-  // Oh, yes! I must bind exactly port 3000. Let's make sure it is 3000.
   const REAL_PORT = 3000;
 
   app.use(express.json({ limit: "15mb" }));
@@ -853,9 +850,11 @@ async function startServer() {
     });
   }
 
-  app.listen(REAL_PORT, "0.0.0.0", () => {
-    console.log(`🚀 Servidor full-stack corriendo en http://localhost:${REAL_PORT}`);
-  });
+  if (!process.env.VERCEL) {
+    app.listen(REAL_PORT, "0.0.0.0", () => {
+      console.log(`🚀 Servidor full-stack corriendo en http://localhost:${REAL_PORT}`);
+    });
+  }
 }
 
 startServer();
