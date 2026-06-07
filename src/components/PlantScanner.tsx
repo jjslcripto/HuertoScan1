@@ -345,6 +345,12 @@ export const PlantScanner: React.FC<PlantScannerProps> = ({ onCropIdentified }) 
                 <h5 className="font-bold text-slate-800 text-[16px] mt-1">{scannedResult.name}</h5>
                 <p className="text-xs text-slate-500 italic font-mono">{scannedResult.scientificName}</p>
                 <p className="text-xs text-slate-600"><strong className="text-slate-800 font-semibold">Origen:</strong> {scannedResult.origin}</p>
+                {scannedResult.image && (scannedResult.image.startsWith("/src/imagenes") || scannedResult.image.startsWith("/src/Imagenes")) && (
+                  <p className="text-[10px] text-emerald-600 font-semibold mt-1 flex items-center gap-1 flex-wrap">
+                    <span>✓ Guardado en:</span>
+                    <code className="bg-slate-100 px-1.5 py-0.5 rounded font-mono text-[9.5px] text-slate-700">{scannedResult.image}</code>
+                  </p>
+                )}
               </div>
             </div>
 

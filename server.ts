@@ -509,6 +509,7 @@ async function startServer() {
 
   app.use(express.json({ limit: "15mb" }));
   app.use(express.urlencoded({ extended: true, limit: "15mb" }));
+  app.use("/src/Imagenes", express.static(path.join(process.cwd(), "src", "Imagenes")));
   app.use("/src/imagenes", express.static(path.join(process.cwd(), "src", "imagenes")));
 
   // API Endpoints
@@ -669,7 +670,7 @@ async function startServer() {
   app.post("/api/scan-plant", async (req, res) => {
     const { base64Image, mimeType, isPresetSeed, presetIndex, targetElement } = req.body;
 
-    // Guardar imagen en src/imagenes de inmediato si se provee
+    // Guardar imagen en src/Imagenes de inmediato si se provee
     let savedImagePath = "";
     if (base64Image && base64Image.startsWith("data:image")) {
       try {
@@ -686,7 +687,7 @@ async function startServer() {
         }
         if (ext === "jpeg") ext = "jpg";
         
-        const dirPath = path.join(process.cwd(), "src", "imagenes");
+        const dirPath = path.join(process.cwd(), "src", "Imagenes");
         if (!fs.existsSync(dirPath)) {
           fs.mkdirSync(dirPath, { recursive: true });
         }
@@ -696,9 +697,9 @@ async function startServer() {
         fs.writeFileSync(filePath, buffer);
         console.log(`📸 Imagen de escaneo guardada exitosamente en: ${filePath}`);
         
-        savedImagePath = `/src/imagenes/${fileName}`;
+        savedImagePath = `/src/Imagenes/${fileName}`;
       } catch (err) {
-        console.error("Error al guardar la imagen en src/imagenes:", err);
+        console.error("Error al guardar la imagen en src/Imagenes:", err);
       }
     }
 
