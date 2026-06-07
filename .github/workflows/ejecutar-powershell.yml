@@ -1,0 +1,26 @@
+name: Ejecutar PowerShell
+
+# Esto define cuándo se ejecutará la acción (en este caso, al hacer push a la rama 'main')
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch: # Permite ejecutarlo manualmente desde la pestaña "Actions"
+
+jobs:
+  build:
+    # Puedes usar windows-latest, ubuntu-latest o macos-latest
+    runs-on: windows-latest 
+
+    steps:
+      - name: Descargar el código del repositorio
+        uses: actions/checkout@v4
+
+      - name: Ejecutar un comando de PowerShell directo (Inline)
+        shell: pwsh
+        run: |
+          Write-Host "¡Hola desde PowerShell en GitHub Actions!"
+          Get-Process | Select-Object Name, Id -First 5
+
+      - name: Ejecutar un archivo de script (.ps1)
+        shell: pwsh
+        run: ./mi-script.ps1
