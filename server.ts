@@ -509,6 +509,7 @@ async function startServer() {
 
   app.use(express.json({ limit: "15mb" }));
   app.use(express.urlencoded({ extended: true, limit: "15mb" }));
+  app.use("/src/imagenes", express.static(path.join(process.cwd(), "src", "imagenes")));
 
   // API Endpoints
   app.get("/api/crops", (req, res) => {
@@ -668,6 +669,39 @@ async function startServer() {
   app.post("/api/scan-plant", async (req, res) => {
     const { base64Image, mimeType, isPresetSeed, presetIndex, targetElement } = req.body;
 
+    // Guardar imagen en src/imagenes de inmediato si se provee
+    let savedImagePath = "";
+    if (base64Image && base64Image.startsWith("data:image")) {
+      try {
+        const cleanBase = base64Image.replace(/^data:image\/\w+;base64,/, "");
+        const buffer = Buffer.from(cleanBase, "base64");
+        
+        let ext = "jpg";
+        if (mimeType) {
+          const parts = mimeType.split("/");
+          if (parts.length > 1) ext = parts[1];
+        } else {
+          const match = base64Image.match(/^data:image\/(\w+);base64,/);
+          if (match) ext = match[1];
+        }
+        if (ext === "jpeg") ext = "jpg";
+        
+        const dirPath = path.join(process.cwd(), "src", "imagenes");
+        if (!fs.existsSync(dirPath)) {
+          fs.mkdirSync(dirPath, { recursive: true });
+        }
+        
+        const fileName = `scan-${Date.now()}.${ext}`;
+        const filePath = path.join(dirPath, fileName);
+        fs.writeFileSync(filePath, buffer);
+        console.log(`📸 Imagen de escaneo guardada exitosamente en: ${filePath}`);
+        
+        savedImagePath = `/src/imagenes/${fileName}`;
+      } catch (err) {
+        console.error("Error al guardar la imagen en src/imagenes:", err);
+      }
+    }
+
     // Local quick sandbox preview presets
     if (isPresetSeed) {
       const idx = Number(presetIndex) >= 0 && Number(presetIndex) < PRESETS_BOTANICAL.length ? Number(presetIndex) : 0;
@@ -698,7 +732,7 @@ async function startServer() {
           success: true,
           data: {
             ...matchedPreset,
-            image: base64Image || matchedPreset.image,
+            image: savedImagePath || base64Image || matchedPreset.image,
             detectedElement: targetElement // Preserve the exact title requested by the user
           },
           method: "Análisis Óptico Directo",
@@ -729,9 +763,7 @@ async function startServer() {
       }
 
       const item = { ...selectedPreset };
-      if (!item.image) {
-        item.image = getFallbackImageByPlantName(item.name);
-      }
+      item.image = savedImagePath || getFallbackImageByPlantName(item.name);
       return res.json({
         success: true,
         data: item,
@@ -808,8 +840,8 @@ async function startServer() {
 
       if (response && response.text) {
         const parsedData = JSON.parse(response.text.trim());
-        // Preserve user scanned base64 image when available, otherwise fall back to Unsplash
-        parsedData.image = base64Image || getFallbackImageByPlantName(parsedData.name);
+        // Preserve user scanned local image path when available, otherwise fall back to Unsplash
+        parsedData.image = savedImagePath || getFallbackImageByPlantName(parsedData.name);
         res.json({
           success: true,
           data: parsedData,
@@ -822,10 +854,8 @@ async function startServer() {
       console.log("ℹ️ [Gemini Status] Nota: Las peticiones a la API de Gemini están muy congestionadas en este momento. Se ha activado la ficha botánica pre-integrada del invernadero local de forma automática.");
       const randomIndex = Math.floor(Math.random() * PRESETS_BOTANICAL.length);
       const item = { ...PRESETS_BOTANICAL[randomIndex] };
-      // Always assign clean Unsplash image URL fallback, never the huge base64 payload to prevent QuotaExceededError
-      if (!item.image) {
-        item.image = getFallbackImageByPlantName(item.name);
-      }
+      // Always assign savedImagePath if available, then Unsplash fallback, never the huge base64
+      item.image = savedImagePath || getFallbackImageByPlantName(item.name);
       res.json({
         success: true,
         data: item,
