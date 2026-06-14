@@ -13,9 +13,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Supabase configuration
-const rawSupabaseUrl = process.env.VITE_SUPABASE_URL || "https://himoehlftyoihvwqecou.supabase.co";
-const supabaseUrl = rawSupabaseUrl.replace(/\/rest\/v1\/?$/, "").replace(/['"]+/g, '');
-const supabaseAnonKey = (process.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_Wy9UDQ6DCM5iiTs_-fLm0g_qQ38bYis").replace(/['"]+/g, '');
+const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://himoehlftyoihvwqecou.supabase.co";
+const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_Wy9UDQ6DCM5iiTs_-fLm0g_qQ38bYis";
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 // Initialize Gemini Client Lazily/Safely
@@ -735,9 +734,42 @@ async function startServer() {
   app.post("/api/scan-plant", async (req, res) => {
     const { base64Image, mimeType, isPresetSeed, presetIndex, targetElement } = req.body;
 
-    let finalImage = "";
+    // Guardar imagen en src/Imagenes de inmediato si se provee
+    let savedImagePath = "";
     if (base64Image && base64Image.startsWith("data:image")) {
-      finalImage = base64Image;
+      try {
+        const parts = base64Image.split(";base64,");
+        const cleanBase = parts.length > 1 ? parts[1] : base64Image;
+        const buffer = Buffer.from(cleanBase, "base64");
+        
+        let ext = "jpg";
+        if (mimeType) {
+          const mParts = mimeType.split("/");
+          if (mParts.length > 1) ext = mParts[1];
+        } else {
+          const match = base64Image.match(/^data:image\/([a-zA-Z0-9+.-]+);base64,/);
+          if (match) ext = match[1];
+        }
+        
+        // Normalizar extensiones comunes
+        ext = ext.toLowerCase();
+        if (ext === "jpeg") ext = "jpg";
+        else if (ext === "svg+xml") ext = "svg";
+        
+        const dirPath = path.join(process.cwd(), "src", "Imagenes");
+        if (!fs.existsSync(dirPath)) {
+          fs.mkdirSync(dirPath, { recursive: true });
+        }
+        
+        const fileName = `scan-${Date.now()}.${ext}`;
+        const filePath = path.join(dirPath, fileName);
+        fs.writeFileSync(filePath, buffer);
+        console.log(`📸 Imagen de escaneo guardada exitosamente en: ${filePath}`);
+        
+        savedImagePath = `/src/Imagenes/${fileName}`;
+      } catch (err) {
+        console.error("Error al guardar la imagen en src/Imagenes:", err);
+      }
     }
 
     // Local quick sandbox preview presets
@@ -770,7 +802,7 @@ async function startServer() {
           success: true,
           data: {
             ...matchedPreset,
-            image: finalImage || base64Image || matchedPreset.image,
+            image: savedImagePath || base64Image || matchedPreset.image,
             detectedElement: targetElement // Preserve the exact title requested by the user
           },
           method: "Análisis Óptico Directo",
@@ -801,7 +833,7 @@ async function startServer() {
       }
 
       const item = { ...selectedPreset };
-      item.image = finalImage || getFallbackImageByPlantName(item.name);
+      item.image = savedImagePath || getFallbackImageByPlantName(item.name);
       return res.json({
         success: true,
         data: item,
@@ -879,7 +911,7 @@ async function startServer() {
       if (response && response.text) {
         const parsedData = JSON.parse(response.text.trim());
         // Preserve user scanned local image path when available, otherwise fall back to Unsplash
-        parsedData.image = finalImage || getFallbackImageByPlantName(parsedData.name);
+        parsedData.image = savedImagePath || getFallbackImageByPlantName(parsedData.name);
         res.json({
           success: true,
           data: parsedData,
@@ -892,8 +924,8 @@ async function startServer() {
       console.log("ℹ️ [Gemini Status] Nota: Las peticiones a la API de Gemini están muy congestionadas en este momento. Se ha activado la ficha botánica pre-integrada del invernadero local de forma automática.");
       const randomIndex = Math.floor(Math.random() * PRESETS_BOTANICAL.length);
       const item = { ...PRESETS_BOTANICAL[randomIndex] };
-      // Always assign finalImage if available, then Unsplash fallback, never the huge base64
-      item.image = finalImage || getFallbackImageByPlantName(item.name);
+      // Always assign savedImagePath if available, then Unsplash fallback, never the huge base64
+      item.image = savedImagePath || getFallbackImageByPlantName(item.name);
       res.json({
         success: true,
         data: item,
