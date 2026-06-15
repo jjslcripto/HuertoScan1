@@ -70,15 +70,16 @@ export default function App() {
   const fetchCrops = async () => {
     try {
       const res = await fetch("/api/crops");
+      if (!res.ok) {
+        throw new Error(`API returned status ${res.status}`);
+      }
       const serverCrops: Crop[] = await res.json();
       
       const localStr = localStorage.getItem("solana_garden_crops");
       let localCrops: Crop[] = [];
       if (localStr) {
         try {
-          const parsed = JSON.parse(localStr);
-          // Deduplicate local crops
-          localCrops = Array.from(new Map(parsed.map((item: any) => [item.id, item])).values()) as Crop[];
+          localCrops = JSON.parse(localStr);
         } catch (e) {
           console.error("Error parsing local crops:", e);
         }
@@ -123,6 +124,9 @@ export default function App() {
   const fetchLedger = async () => {
     try {
       const res = await fetch("/api/ledger");
+      if (!res.ok) {
+        throw new Error(`API returned status ${res.status}`);
+      }
       const data = await res.json();
       const serverLogs: PaymentLog[] = data.ledger || [];
       const serverVolume: number = data.totalSalesUsd !== undefined ? data.totalSalesUsd : 28.62;

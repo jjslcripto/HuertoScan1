@@ -13,9 +13,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Supabase configuration
-let supabaseUrl = process.env.VITE_SUPABASE_URL || "https://himoehlftyoihvwqecou.supabase.co";
-supabaseUrl = supabaseUrl.replace(/\/rest\/v1\/?$/, "").replace(/\/$/, "");
-
+const rawSupabaseUrl = process.env.VITE_SUPABASE_URL || "https://himoehlftyoihvwqecou.supabase.co";
+const supabaseUrl = rawSupabaseUrl.replace(/\/rest\/v1\/?$/, '');
 const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_Wy9UDQ6DCM5iiTs_-fLm0g_qQ38bYis";
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
@@ -522,12 +521,14 @@ async function startServer() {
 
   // API Endpoints
   app.get("/api/crops", async (req, res) => {
-    const { data, error } = await supabase.from('crops').select('*');
-    if (error) {
-      console.error("Supabase /api/crops GET error (asegúrese de crear las tablas):", error.message);
-      return res.json(activeCrops || []);
+    try {
+      const { data, error } = await supabase.from('crops').select('*');
+      if (error) throw error;
+      res.json(data || []);
+    } catch (error: any) {
+      console.error("Supabase /api/crops GET error:", error.message || error);
+      res.json(activeCrops);
     }
-    res.json(data || []);
   });
 
   app.post("/api/crops", async (req, res) => {
@@ -563,78 +564,87 @@ async function startServer() {
       pestPrevention: pestPrevention || "",
       detectedElement: detectedElement || "Plantas"
     };
-    
-    // Check if exists
-    const { data: existing } = await supabase.from('crops').select('id').eq('id', newCrop.id).single();
-    
-    if (existing) {
-      return res.json(newCrop); // Usually should return it if it already successfully created
-    }
 
-    const { data, error } = await supabase.from('crops').insert([newCrop]).select();
-    if (error) {
-       console.error("Supabase /api/crops POST error:", error.message);
-       if (!activeCrops.some(c => c.id === newCrop.id)) {
-           activeCrops.push(newCrop);
-           saveCrops(activeCrops);
+    try {
+      // Check if exists
+      const { data: existing } = await supabase.from('crops').select('id').eq('id', newCrop.id).single();
+      
+      if (existing) {
+        return res.json(newCrop);
+      }
+
+      const { data, error } = await supabase.from('crops').insert([newCrop]).select();
+      if (error) throw error;
+      
+      res.status(201).json(data?.[0] || newCrop);
+    } catch (error: any) {
+       console.error("Supabase /api/crops POST error:", JSON.stringify(error, null, 2), error.message);
+       if (!activeCrops.find(c => c.id === newCrop.id)) {
+         activeCrops.push(newCrop);
+         saveCrops(activeCrops);
        }
-       return res.status(201).json(newCrop);
+       res.status(201).json(newCrop);
     }
-    
-    res.status(201).json(data?.[0] || newCrop);
   });
 
   app.put("/api/crops/:id", async (req, res) => {
     const { id } = req.params;
-    const { data, error } = await supabase.from('crops').update(req.body).eq('id', id).select();
-    
-    if (error) {
-      console.error("Supabase /api/crops PUT error:", error.message);
-      const index = activeCrops.findIndex(c => c.id === id);
-      if (index !== -1) {
-        activeCrops[index] = { ...activeCrops[index], ...req.body };
-        saveCrops(activeCrops);
-        return res.json(activeCrops[index]);
+    try {
+      const { data, error } = await supabase.from('crops').update(req.body).eq('id', id).select();
+      
+      if (error) throw error;
+      
+      if (data && data.length > 0) {
+        res.json(data[0]);
+      } else {
+        res.status(404).json({ error: "Cultivo no encontrado" });
       }
-      return res.status(404).json({ error: "Cultivo no encontrado" });
-    }
-    
-    if (data && data.length > 0) {
-      res.json(data[0]);
-    } else {
-      res.status(404).json({ error: "Cultivo no encontrado" });
+    } catch (error: any) {
+      console.error("Supabase /api/crops PUT error:", error);
+      const idx = activeCrops.findIndex(c => c.id === id);
+      if (idx !== -1) {
+        activeCrops[idx] = { ...activeCrops[idx], ...req.body };
+        saveCrops(activeCrops);
+        res.json(activeCrops[idx]);
+      } else {
+        res.status(404).json({ error: "Cultivo no encontrado localmente" });
+      }
     }
   });
 
   app.delete("/api/crops/:id", async (req, res) => {
     const { id } = req.params;
-    const { error } = await supabase.from('crops').delete().eq('id', id);
-    if (error) {
-      console.error("Supabase /api/crops DELETE error:", error.message);
+    try {
+      const { error } = await supabase.from('crops').delete().eq('id', id);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Supabase /api/crops DELETE error:", error);
       activeCrops = activeCrops.filter(c => c.id !== id);
       saveCrops(activeCrops);
-      return res.json({ success: true });
+      res.json({ success: true });
     }
-    res.json({ success: true });
   });
 
   // Payment Ledger Endpoints
   app.get("/api/ledger", async (req, res) => {
-    const { data: ledgerData, error: ledgerError } = await supabase.from('ledger').select('*').order('timestamp', { ascending: false });
-    const { data: volumeData } = await supabase.from('store_metrics').select('totalSalesUsd').eq('id', 'main').single();
-    
-    if (ledgerError) {
-      console.error("Supabase /api/ledger GET error:", ledgerError.message);
-      return res.json({
-        ledger: paymentLedger || [],
-        totalSalesUsd: mockVolumenSalesUsd || 0,
+    try {
+      const { data: ledgerData, error: ledgerError } = await supabase.from('ledger').select('*').order('timestamp', { ascending: false });
+      if (ledgerError) throw ledgerError;
+      
+      const { data: volumeData } = await supabase.from('store_metrics').select('totalSalesUsd').eq('id', 'main').single();
+      
+      res.json({
+        ledger: ledgerData || [],
+        totalSalesUsd: volumeData?.totalSalesUsd || mockVolumenSalesUsd || 0,
+      });
+    } catch (error: any) {
+      console.error("Supabase /api/ledger GET error:", error);
+      res.json({
+        ledger: paymentLedger,
+        totalSalesUsd: mockVolumenSalesUsd
       });
     }
-
-    res.json({
-      ledger: ledgerData || [],
-      totalSalesUsd: volumeData?.totalSalesUsd || mockVolumenSalesUsd || 0,
-    });
   });
 
   app.post("/api/ledger", async (req, res) => {
@@ -648,53 +658,54 @@ async function startServer() {
       amount: Number(amount) || 0,
       currency: currency || "SOL",
       signature: signature || Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15),
-      status: "EXITOSO"
+      status: "EXITOSO" as const
     };
 
-    const { error } = await supabase.from('ledger').insert([newLog]);
-    if (error) {
-       console.error("Supabase /api/ledger POST error:", error.message);
-       // Fallback local
-       const existingLog = paymentLedger.find(log => log.id === newLog.id);
-       if (!existingLog) {
-         paymentLedger.unshift(newLog);
-         saveLedger(paymentLedger);
-       }
-    }
-
-    // Approximate USD conversion dynamically for sales metric
     let usdValue = newLog.amount;
     if (newLog.currency === "SOL") {
-      usdValue = newLog.amount * 150.0; // Assume 1 SOL = $150 USD
+      usdValue = newLog.amount * 150.0;
     }
     
-    // Update volume in DB
-    mockVolumenSalesUsd = Number((mockVolumenSalesUsd + usdValue).toFixed(2));
-    
-    if (error) {
-      saveVolume(mockVolumenSalesUsd);
-    } else {
-      await supabase.from('store_metrics').upsert([{ id: 'main', totalSalesUsd: mockVolumenSalesUsd }]);
+    try {
+      const { error } = await supabase.from('ledger').insert([newLog as any]);
+      if (error) throw error;
+      
+      const newVol = Number((mockVolumenSalesUsd + usdValue).toFixed(2));
+      mockVolumenSalesUsd = newVol;
+      await supabase.from('store_metrics').upsert([{ id: 'main', totalSalesUsd: newVol }]);
+      
+      res.status(201).json({ log: newLog, totalSalesUsd: newVol });
+    } catch (error: any) {
+       console.error("Supabase /api/ledger POST error:", error);
+       
+       if (!paymentLedger.find(l => l.id === newLog.id)) {
+         paymentLedger.unshift(newLog as ServerLedgerLog);
+         saveLedger(paymentLedger);
+         
+         const newVol = Number((mockVolumenSalesUsd + usdValue).toFixed(2));
+         mockVolumenSalesUsd = newVol;
+         saveVolume(newVol);
+       }
+       
+       res.status(201).json({ log: newLog, totalSalesUsd: mockVolumenSalesUsd });
     }
-
-    res.status(201).json({ log: newLog, totalSalesUsd: mockVolumenSalesUsd });
   });
 
   app.delete("/api/ledger", async (req, res) => {
-    const { error } = await supabase.from('ledger').delete().neq('id', 'clear_all'); // Clear all rows
-    if (error) {
-       console.error("Supabase /api/ledger DELETE error:", error.message);
-       paymentLedger = [];
-       mockVolumenSalesUsd = 0.00;
-       saveLedger(paymentLedger);
-       saveVolume(mockVolumenSalesUsd);
-       return res.json({ success: true, totalSalesUsd: 0.00 });
+    try {
+      await supabase.from('ledger').delete().neq('id', 'clear_all');
+      await supabase.from('store_metrics').upsert([{ id: 'main', totalSalesUsd: 0 }]);
+      mockVolumenSalesUsd = 0;
+      
+      res.json({ success: true, totalSalesUsd: 0.00 });
+    } catch (error: any) {
+      console.error("Supabase /api/ledger DELETE error:", error);
+      paymentLedger = [];
+      saveLedger(paymentLedger);
+      mockVolumenSalesUsd = 0;
+      saveVolume(0);
+      res.json({ success: true, totalSalesUsd: 0.00 });
     }
-    
-    await supabase.from('store_metrics').upsert([{ id: 'main', totalSalesUsd: 0 }]);
-    mockVolumenSalesUsd = 0;
-    
-    res.json({ success: true, totalSalesUsd: 0.00 });
   });
 
   // Gemini Scan Helper with exponential retries and fallback model
@@ -703,7 +714,8 @@ async function startServer() {
     let lastError: any = null;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      const model = attempt === 1 ? "gemini-2.5-flash" : "gemini-2.0-flash";
+      // Alternate models: Attempt 1 uses gemini-3.5-flash. If busy, try gemini-3.1-flash-lite immediately
+      const model = attempt === 1 ? "gemini-3.5-flash" : "gemini-3.1-flash-lite";
       console.log(`🤖 [Botanical Analysis] Attempt ${attempt}/${maxAttempts} using model: ${model}`);
       try {
         const response = await client.models.generateContent({
@@ -850,7 +862,7 @@ async function startServer() {
     }
 
     try {
-      const cleanBase64 = base64Image.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, "");
+      const cleanBase64 = base64Image.replace(/^data:image\/\w+;base64,/, "");
       const imgPart = {
         inlineData: {
           mimeType: mimeType || "image/jpeg",
@@ -912,8 +924,7 @@ async function startServer() {
       const response = await generateBotanicalContentWithRetry(client, imgPart, textPart, responseSchema);
 
       if (response && response.text) {
-        const cleanedText = response.text.replace(/```json/g, "").replace(/```/g, "").trim();
-        const parsedData = JSON.parse(cleanedText);
+        const parsedData = JSON.parse(response.text.trim());
         // Preserve user scanned local image path when available, otherwise fall back to Unsplash
         parsedData.image = savedImagePath || getFallbackImageByPlantName(parsedData.name);
         res.json({
@@ -925,7 +936,6 @@ async function startServer() {
         throw new Error("No text response from Gemini");
       }
     } catch (error: any) {
-      console.error("ℹ️ [Gemini Status] Error real en Gemini API o parseo:", error.message, error.stack);
       console.log("ℹ️ [Gemini Status] Nota: Las peticiones a la API de Gemini están muy congestionadas en este momento. Se ha activado la ficha botánica pre-integrada del invernadero local de forma automática.");
       const randomIndex = Math.floor(Math.random() * PRESETS_BOTANICAL.length);
       const item = { ...PRESETS_BOTANICAL[randomIndex] };
