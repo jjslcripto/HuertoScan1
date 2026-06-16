@@ -751,7 +751,7 @@ async function startServer() {
 
     // Guardar imagen en src/Imagenes de inmediato si se provee
     let savedImagePath = "";
-    if (base64Image && base64Image.startsWith("data:image")) {
+    if (base64Image && /^data:image\/\w+;base64,/.test(base64Image)) {
       try {
         const parts = base64Image.split(";base64,");
         const cleanBase = parts.length > 1 ? parts[1] : base64Image;
@@ -762,7 +762,7 @@ async function startServer() {
           const mParts = mimeType.split("/");
           if (mParts.length > 1) ext = mParts[1];
         } else {
-          const match = base64Image.match(/^data:image\/([a-zA-Z0-9+.-]+);base64,/);
+          const match = base64Image.match(/^data:image\/([a-zA-Z0-9+.-]+);base64,/i);
           if (match) ext = match[1];
         }
         
