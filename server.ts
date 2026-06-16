@@ -749,7 +749,7 @@ async function startServer() {
   app.post("/api/scan-plant", async (req, res) => {
     const { base64Image, mimeType, isPresetSeed, presetIndex, targetElement } = req.body;
 
-    // Guardar imagen en src/Imagenes de inmediato si se provee
+    // Guardar imagen en Supabase Storage de inmediato si se provee
     let savedImagePath = "";
     if (base64Image && /^data:image\/\w+;base64,/.test(base64Image)) {
       try {
@@ -771,19 +771,22 @@ async function startServer() {
         if (ext === "jpeg") ext = "jpg";
         else if (ext === "svg+xml") ext = "svg";
         
-        const dirPath = path.join(process.cwd(), "src", "Imagenes");
-        if (!fs.existsSync(dirPath)) {
-          fs.mkdirSync(dirPath, { recursive: true });
-        }
-        
         const fileName = `scan-${Date.now()}.${ext}`;
-        const filePath = path.join(dirPath, fileName);
-        fs.writeFileSync(filePath, buffer);
-        console.log(`📸 Imagen de escaneo guardada exitosamente en: ${filePath}`);
         
-        savedImagePath = `/src/Imagenes/${fileName}`;
+        // Subir a Supabase Storage: bucket 'imagenes'
+        const { data, error } = await supabase.storage.from("imagenes").upload(fileName, buffer, {
+          contentType: mimeType || `image/${ext}`
+        });
+
+        if (error) {
+          console.error("Error al subir imagen a Supabase:", error);
+        } else {
+          const { data: publicUrlData } = supabase.storage.from("imagenes").getPublicUrl(fileName);
+          savedImagePath = publicUrlData.publicUrl;
+          console.log(`📸 Imagen de escaneo guardada exitosamente en Supabase: ${savedImagePath}`);
+        }
       } catch (err) {
-        console.error("Error al guardar la imagen en src/Imagenes:", err);
+        console.error("Error procesando o subiendo la imagen:", err);
       }
     }
 
