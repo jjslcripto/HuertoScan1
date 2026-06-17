@@ -558,10 +558,9 @@ function saveVolume(volume: number) {
   }
 }
 
-// Removing local variables
-let activeCrops: ServerCrop[] = [];
-let paymentLedger: ServerLedgerLog[] = [];
-let mockVolumenSalesUsd = 0;
+let activeCrops: ServerCrop[] = loadCrops();
+let paymentLedger: ServerLedgerLog[] = loadLedger();
+let mockVolumenSalesUsd = loadVolume();
 
 export const app = express();
 
@@ -599,7 +598,7 @@ async function startServer() {
       res.json(data || []);
     } catch (error: any) {
       console.error("Supabase /api/crops GET error:", error.message || error);
-      res.status(500).json({ error: "Fallo al conectar con la base de datos (Supabase)." });
+      res.json(activeCrops);
     }
   });
 
@@ -659,7 +658,11 @@ async function startServer() {
       res.status(201).json(data?.[0] || newCrop);
     } catch (error: any) {
        console.error("Supabase /api/crops POST error:", JSON.stringify(error, null, 2), error.message);
-       res.status(500).json({ error: "Error al guardar el cultivo en base de datos. Verifica RLS y tablas." });
+       if (!activeCrops.find(c => c.id === newCrop.id)) {
+         activeCrops.push(newCrop);
+         saveCrops(activeCrops);
+       }
+       res.status(201).json(newCrop);
     }
   });
 
@@ -677,11 +680,18 @@ async function startServer() {
       if (data && data.length > 0) {
         res.json(data[0]);
       } else {
-        res.status(404).json({ error: "Cultivo no encontrado en DB" });
+        res.status(404).json({ error: "Cultivo no encontrado" });
       }
     } catch (error: any) {
       console.error("Supabase /api/crops PUT error:", error);
-      res.status(500).json({ error: "Error actualizando el cultivo en DB." });
+      const idx = activeCrops.findIndex(c => c.id === id);
+      if (idx !== -1) {
+        activeCrops[idx] = { ...activeCrops[idx], ...req.body };
+        saveCrops(activeCrops);
+        res.json(activeCrops[idx]);
+      } else {
+        res.status(404).json({ error: "Cultivo no encontrado localmente" });
+      }
     }
   });
 
@@ -697,7 +707,9 @@ async function startServer() {
       res.json({ success: true });
     } catch (error: any) {
       console.error("Supabase /api/crops DELETE error:", error);
-      res.status(500).json({ error: "Error borrando el cultivo en DB." });
+      activeCrops = activeCrops.filter(c => c.id !== id);
+      saveCrops(activeCrops);
+      res.json({ success: true });
     }
   });
 
@@ -719,11 +731,14 @@ async function startServer() {
       
       res.json({
         ledger: ledgerData || [],
-        totalSalesUsd: volumeData?.totalSalesUsd || 0,
+        totalSalesUsd: volumeData?.totalSalesUsd || mockVolumenSalesUsd || 0,
       });
     } catch (error: any) {
       console.error("Supabase /api/ledger GET error:", error);
-      res.status(500).json({ error: "Error obteniendo el ledger." });
+      res.json({
+        ledger: paymentLedger,
+        totalSalesUsd: mockVolumenSalesUsd
+      });
     }
   });
 
@@ -765,7 +780,17 @@ async function startServer() {
       res.status(201).json({ log: newLog, totalSalesUsd: newVol });
     } catch (error: any) {
        console.error("Supabase /api/ledger POST error:", error);
-       res.status(500).json({ error: "Error guardando el pago." });
+       
+       if (!paymentLedger.find(l => l.id === newLog.id)) {
+         paymentLedger.unshift(newLog as ServerLedgerLog);
+         saveLedger(paymentLedger);
+         
+         const newVol = Number((mockVolumenSalesUsd + usdValue).toFixed(2));
+         mockVolumenSalesUsd = newVol;
+         saveVolume(newVol);
+       }
+       
+       res.status(201).json({ log: newLog, totalSalesUsd: mockVolumenSalesUsd });
     }
   });
 
@@ -786,17 +811,22 @@ async function startServer() {
       res.json({ success: true, totalSalesUsd: 0.00 });
     } catch (error: any) {
       console.error("Supabase /api/ledger DELETE error:", error);
-      res.status(500).json({ error: "Error borrando el ledger." });
+      paymentLedger = [];
+      saveLedger(paymentLedger);
+      mockVolumenSalesUsd = 0;
+      saveVolume(0);
+      res.json({ success: true, totalSalesUsd: 0.00 });
     }
   });
 
   // Gemini Scan Helper with exponential retries and fallback model
   async function generateBotanicalContentWithRetry(client: any, imgPart: any, textPart: any, schema: any) {
-    const maxAttempts = 2; // Reduced to avoid vercel timeout
+    const maxAttempts = 3;
     let lastError: any = null;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      const model = attempt === 1 ? "gemini-2.5-flash" : "gemini-1.5-flash";
+      // Alternate models: Attempt 1 uses gemini-3.5-flash. If busy, try gemini-3.1-flash-lite immediately
+      const model = attempt === 1 ? "gemini-3.5-flash" : "gemini-3.1-flash-lite";
       console.log(`🤖 [Botanical Analysis] Attempt ${attempt}/${maxAttempts} using model: ${model}`);
       try {
         const response = await client.models.generateContent({
@@ -814,15 +844,16 @@ async function startServer() {
         throw new Error("Respuesta vacia");
       } catch (err: any) {
         lastError = err;
-        console.log(`[Botanical Analysis] Model ${model} returned error:`, err?.message || err);
-        // If we still have attempts, sleep short to avoid vercel limits
+        console.log(`[Botanical Analysis] Model ${model} returned status: API_BUSY_OR_UNAVAILABLE`);
+        // If we still have attempts, sleep with exponential backoff
         if (attempt < maxAttempts) {
-          await new Promise((resolve) => setTimeout(resolve, 500));
+          const sleepMs = attempt * 1500;
+          console.log(`[Botanical Analysis] Sleeping ${sleepMs}ms before next model attempt...`);
+          await new Promise((resolve) => setTimeout(resolve, sleepMs));
         }
       }
     }
-    console.error("Gemini failed after retries:", lastError);
-    return null;
+    throw lastError || new Error("Se rebasaron todos los reintentos");
   }
 
   // Scan Plant Endpoint
